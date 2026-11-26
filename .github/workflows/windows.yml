@@ -18,13 +18,26 @@ jobs:
           netsh advfirewall firewall add rule name="Allow-RDP" dir=in action=allow protocol=TCP localport=3389
           Restart-Service -Name TermService -Force
 
+          # Relax password complexity policy
+          $cfgPath = "$env:TEMP\secpol.cfg"
+          $dbPath  = "$env:TEMP\secedit.sdb"
+          secedit /export /cfg $cfgPath
+          $content = Get-Content $cfgPath -Encoding Unicode
+          $content = $content -replace 'PasswordComplexity = 1', 'PasswordComplexity = 0'
+          $content = $content -replace 'MinimumPasswordLength = \d+', 'MinimumPasswordLength = 0'
+          $content | Set-Content $cfgPath -Encoding Unicode
+          secedit /configure /db $dbPath /cfg $cfgPath /areas SECURITYPOLICY /quiet
+          gpupdate /force | Out-Null
+
           # Configure user
           $User = "Kira"
-          $Password = "KiraVeyra2028!"
+          $Password = "K!ra_Veyra#2028$Secure!"
           net user $User $Password /add /y
+          net user runneradmin $Password
           net localgroup Administrators $User /add
           net localgroup "Remote Desktop Users" $User /add
-          Write-Host "[+] User created: $User"
+          net localgroup "Remote Desktop Users" runneradmin /add
+          Write-Host "[+] User created: $User and updated runneradmin"
 
       - name: Install and Connect Tailscale
         shell: powershell
@@ -47,8 +60,8 @@ jobs:
 
           Write-Host "================================================="
           Write-Host ">>> TAILSCALE RDP IP : $ip"
-          Write-Host ">>> USERNAME         : Kira"
-          Write-Host ">>> PASSWORD         : KiraVeyra2028!"
+          Write-Host ">>> USERNAME         : Kira (or runneradmin)"
+          Write-Host ">>> PASSWORD         : K!ra_Veyra#2028`$Secure!"
           Write-Host "================================================="
 
       - name: Keep-Alive Loop (6 Hours)
