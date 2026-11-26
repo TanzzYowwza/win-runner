@@ -1,0 +1,63 @@
+name: Windows Cloud Environment
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-and-run:
+    runs-on: windows-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Configure Windows Remote Desktop
+        shell: powershell
+        run: |
+          Write-Host "[*] Enabling Remote Desktop Services..."
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
+          netsh advfirewall firewall add rule name="Allow-RDP" dir=in action=allow protocol=TCP localport=3389
+          Restart-Service -Name TermService -Force
+
+          # Configure user
+          $User = "Kira"
+          $Password = "KiraVeyra2028!"
+          net user $User $Password /add /y
+          net localgroup Administrators $User /add
+          net localgroup "Remote Desktop Users" $User /add
+          Write-Host "[+] User created: $User"
+
+      - name: Install and Connect Tailscale
+        shell: powershell
+        run: |
+          Write-Host "[*] Downloading Tailscale MSI..."
+          $url = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
+          Invoke-WebRequest -Uri $url -OutFile "$env:TEMP\tailscale.msi" -UseBasicParsing
+          Start-Process msiexec.exe -ArgumentList "/i","`"$env:TEMP\tailscale.msi`"","/quiet","/norestart" -Wait
+          Remove-Item "$env:TEMP\tailscale.msi" -Force
+
+          Write-Host "[*] Authenticating with Tailscale..."
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=win-rdp-kira --accept-routes
+
+          $ip = $null
+          for ($i = 0; $i -lt 30; $i++) {
+            $ip = (& "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4 2>$null) | Select-Object -First 1
+            if ($ip) { break }
+            Start-Sleep -Seconds 2
+          }
+
+          Write-Host "================================================="
+          Write-Host ">>> TAILSCALE RDP IP : $ip"
+          Write-Host ">>> USERNAME         : Kira"
+          Write-Host ">>> PASSWORD         : KiraVeyra2028!"
+          Write-Host "================================================="
+
+      - name: Keep-Alive Loop (6 Hours)
+        shell: powershell
+        run: |
+          $end = (Get-Date).AddMinutes(350)
+          Write-Host "Session active until $($end.ToString('HH:mm:ss')) UTC"
+          while ((Get-Date) -lt $end) {
+            $remaining = ($end - (Get-Date)).ToString('hh\:mm\:ss')
+            Write-Host "[KeepAlive] Remaining: $remaining"
+            Start-Sleep -Seconds 60
+          }
